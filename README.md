@@ -5,10 +5,10 @@ This repository contains tools and documentation for working with NFC cards, inc
 ## Project Structure
 
 - `nfc.py` — Main Python script for NFC card operations.
-- `mirafare_tool.py` — Additional utilities for working with Mifare cards.
+- `mifare_tool.py` — Additional utilities for working with Mifare cards.
 - `development-breakdown.md` — Breakdown of development tasks and features.
 - `development-milestones.md` — Milestones and progress tracking.
-- `mirafare-tool-ui-breakdown.md` — UI planning and breakdown for the tool.
+- `mifare-tool-ui-breakdown.md` — UI planning and breakdown for the tool.
 - `tech-stack-recommendation.md` — Recommendations and rationale for the chosen tech stack.
 - `.gitignore` — Ensures only relevant files are tracked by git.
 
@@ -31,7 +31,7 @@ This repository contains tools and documentation for working with NFC cards, inc
      ```
 
 3. **Explore the scripts:**
-   - Run `nfc.py` or `mirafare_tool.py` as needed for your NFC card tasks.
+   - Run `nfc.py` or `mifare_tool.py` as needed for your NFC card tasks.
 
 ## Contribution
 

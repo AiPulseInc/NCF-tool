@@ -4,8 +4,11 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 from smartcard.System import readers
+from mifare_utils import parse_key, parse_access_bits, mifare_rights
 
 class MifareToolUI(QWidget):
+    """Graphical interface for interacting with Mifare Classic cards."""
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Mifare Classic Tool by AiPulse")
@@ -14,6 +17,7 @@ class MifareToolUI(QWidget):
         self.init_ui()
 
     def init_ui(self):
+        """Create and connect all UI widgets."""
         main_layout = QVBoxLayout()
 
         # --- Device Info Line ---
@@ -154,14 +158,14 @@ class MifareToolUI(QWidget):
         self.last_block_data = None
 
         # --- Access Bits Table (Placeholder) ---
-        self.access_table = QTableWidget(8, 3)
-        self.access_table.setHorizontalHeaderLabels(["Value", "keyA", "accessBits"])
+        self.trailer_table = QTableWidget(8, 3)
+        self.trailer_table.setHorizontalHeaderLabels(["Value", "keyA", "accessBits"])
         for i in range(8):
-            self.access_table.setItem(i, 0, QTableWidgetItem(str(i)))
-            self.access_table.setItem(i, 1, QTableWidgetItem("-"))
-            self.access_table.setItem(i, 2, QTableWidgetItem("-"))
+            self.trailer_table.setItem(i, 0, QTableWidgetItem(str(i)))
+            self.trailer_table.setItem(i, 1, QTableWidgetItem("-"))
+            self.trailer_table.setItem(i, 2, QTableWidgetItem("-"))
         main_layout.addWidget(QLabel("Access condition for sector trailer"))
-        main_layout.addWidget(self.access_table)
+        main_layout.addWidget(self.trailer_table)
 
         # --- Data Table (Placeholder) ---
         self.data_table = QTableWidget(16, 16)
@@ -177,6 +181,7 @@ class MifareToolUI(QWidget):
         self.setLayout(main_layout)
 
     def refresh_readers(self):
+        """Populate the reader dropdown with available devices."""
         self.reader_combo.clear()
         try:
             self.available_readers = readers()
@@ -194,6 +199,7 @@ class MifareToolUI(QWidget):
             self.status_label.setStyleSheet("color: red; font-weight: bold;")
 
     def connect_reader(self):
+        """Set ``self.selected_reader`` from the combo box."""
         idx = self.reader_combo.currentIndex()
         if hasattr(self, 'available_readers') and self.available_readers and idx >= 0:
             try:
@@ -207,14 +213,17 @@ class MifareToolUI(QWidget):
             self.status_label.setStyleSheet("color: red; font-weight: bold;")
 
     def set_status_ready(self):
+        """Display a 'device ready' status."""
         self.status_label.setText("Status: Device ready")
         self.status_label.setStyleSheet("color: orange; font-weight: bold;")
 
     def set_status_connected(self):
+        """Display a 'device connected' status."""
         self.status_label.setText("Status: Device connected")
         self.status_label.setStyleSheet("color: green; font-weight: bold;")
 
     def scan_card(self):
+        """Read the UID of the card currently on the reader."""
         self.uid_display.setText("")
         self.card_type_display.setText("")
         if not self.selected_reader:
@@ -237,25 +246,33 @@ class MifareToolUI(QWidget):
                 self.card_type_display.setText("")
                 self.status_label.setText(f"Status: Command failed (SW1={sw1:02X} SW2={sw2:02X})")
                 self.status_label.setStyleSheet("color: red;")
-            connection.disconnect()
         except Exception as e:
             self.uid_display.setText("")
             self.card_type_display.setText("")
             self.status_label.setText(f"Status: {e}")
             self.status_label.setStyleSheet("color: red;")
+        finally:
+            try:
+                connection.disconnect()
+            except Exception:
+                pass
 
     def update_selection_label(self):
+        """Display currently selected sector and block."""
         sector = self.sector_spin.value()
         block = self.block_spin.value()
         self.selection_label.setText(f"Current: Sector {sector}, Block {block}")
 
     def authenticate_a(self):
+        """Authenticate current block using Key A."""
         self.authenticate_key(self.key_a_input.text(), key_type='A')
 
     def authenticate_b(self):
+        """Authenticate current block using Key B."""
         self.authenticate_key(self.key_b_input.text(), key_type='B')
 
     def authenticate_key(self, key_str, key_type='A'):
+        """Authenticate to the selected block with the provided key."""
         if not self.selected_reader:
             self.status_label.setText("Status: No device")
             self.status_label.setStyleSheet("color: red; font-weight: bold;")
@@ -266,9 +283,10 @@ class MifareToolUI(QWidget):
             sector = self.sector_spin.value()
             block = self.block_spin.value()
             # Convert key string to bytes
-            key_bytes = [int(x, 16) for x in key_str.strip().split()]
-            if len(key_bytes) != 6:
-                self.status_label.setText("Status: Invalid key")
+            try:
+                key_bytes = parse_key(key_str)
+            except ValueError as e:
+                self.status_label.setText(f"Status: {e}")
                 self.status_label.setStyleSheet("color: red; font-weight: bold;")
                 return
             # APDU for authentication (Mifare Classic)
@@ -283,7 +301,6 @@ class MifareToolUI(QWidget):
             if (sw1, sw2) != (0x90, 0x00):
                 self.status_label.setText(f"Status: Key load fail")
                 self.status_label.setStyleSheet("color: red; font-weight: bold;")
-                connection.disconnect()
                 return
             _, sw1, sw2 = connection.transmit(apdu)
             if (sw1, sw2) == (0x90, 0x00):
@@ -292,12 +309,17 @@ class MifareToolUI(QWidget):
             else:
                 self.status_label.setText(f"Status: Auth {key_type} fail")
                 self.status_label.setStyleSheet("color: red; font-weight: bold;")
-            connection.disconnect()
         except Exception as e:
             self.status_label.setText(f"Status: Error")
             self.status_label.setStyleSheet("color: red; font-weight: bold;")
+        finally:
+            try:
+                connection.disconnect()
+            except Exception:
+                pass
 
     def update_access_table(self):
+        """Read and display access conditions for the selected sector."""
         sector = self.sector_spin.value()
         # Try to authenticate and read the sector trailer
         if not self.selected_reader:
@@ -315,9 +337,7 @@ class MifareToolUI(QWidget):
             connection.connect()
             # Use Key A for authentication by default
             key_str = self.key_a_input.text()
-            key_bytes = [int(x, 16) for x in key_str.strip().split()]
-            if len(key_bytes) != 6:
-                raise ValueError("Invalid Key A")
+            key_bytes = parse_key(key_str)
             # Load Key A into reader
             load_key_apdu = [0xFF, 0x82, 0x00, 0x00, 0x06] + key_bytes
             _, sw1, sw2 = connection.transmit(load_key_apdu)
@@ -338,50 +358,7 @@ class MifareToolUI(QWidget):
             key_a = ' '.join(f'{b:02X}' for b in data[:6])
             access_bytes = data[6:9]
             key_b = ' '.join(f'{b:02X}' for b in data[10:16])
-
             # Parse access bits for each block
-            def parse_access_bits(access_bytes):
-                # Returns a list of 4 tuples: (C1, C2, C3) for block 0-3
-                c1 = []
-                c2 = []
-                c3 = []
-                for i in range(4):
-                    c1.append((access_bytes[1] >> (4 + i)) & 1)
-                    c2.append((access_bytes[2] >> i) & 1)
-                    c3.append((access_bytes[2] >> (4 + i)) & 1)
-                return list(zip(c1, c2, c3))
-
-            def mifare_rights(cbits, block):
-                # Mifare Classic 1K: block 3 is sector trailer, 0-2 are data blocks
-                rights = "?"
-                if block < 3:
-                    # Data block access conditions
-                    table = {
-                        (0,0,0): "Read: A/B, Write: A/B, Inc: A/B, Dec: A/B",
-                        (0,1,0): "Read: A/B, Write: -, Inc: -, Dec: -",
-                        (1,0,0): "Read: A/B, Write: B, Inc: B, Dec: A/B",
-                        (1,1,0): "Read: A/B, Write: B, Inc: -, Dec: -",
-                        (0,0,1): "Read: A/B, Write: -, Inc: -, Dec: -",
-                        (0,1,1): "Read: B, Write: B, Inc: B, Dec: B",
-                        (1,0,1): "Read: -, Write: -, Inc: -, Dec: -",
-                        (1,1,1): "Read: B, Write: -, Inc: -, Dec: -",
-                    }
-                    rights = table.get(cbits, "?")
-                else:
-                    # Sector trailer access conditions
-                    table = {
-                        (0,0,0): "Key A: Read/Write, Access Bits: Write, Key B: Read/Write",
-                        (0,1,0): "Key A: -, Access Bits: Write, Key B: Read/Write",
-                        (1,0,0): "Key A: Read, Access Bits: -, Key B: Read",
-                        (1,1,0): "Key A: -, Access Bits: -, Key B: Read",
-                        (0,0,1): "Key A: Read/Write, Access Bits: Write, Key B: -",
-                        (0,1,1): "Key A: -, Access Bits: Write, Key B: -",
-                        (1,0,1): "Key A: Read, Access Bits: -, Key B: -",
-                        (1,1,1): "Key A: -, Access Bits: -, Key B: -",
-                    }
-                    rights = table.get(cbits, "?")
-                return rights
-
             cbits_list = parse_access_bits(access_bytes)
 
             for block in range(4):
@@ -397,7 +374,6 @@ class MifareToolUI(QWidget):
                 self.access_table.setItem(block, 4, QTableWidgetItem(rights))
             self.status_label.setText("Status: Access bits read")
             self.status_label.setStyleSheet("color: green; font-weight: bold;")
-            connection.disconnect()
         except Exception as e:
             self.status_label.setText(f"Status: Access bits fail: {e}")
             self.status_label.setStyleSheet("color: red; font-weight: bold;")
@@ -407,8 +383,14 @@ class MifareToolUI(QWidget):
                 self.access_table.setItem(block, 2, QTableWidgetItem("-"))
                 self.access_table.setItem(block, 3, QTableWidgetItem("-"))
                 self.access_table.setItem(block, 4, QTableWidgetItem("-"))
+        finally:
+            try:
+                connection.disconnect()
+            except Exception:
+                pass
 
     def read_block(self):
+        """Read data from the currently selected block."""
         if not self.selected_reader:
             self.status_label.setText("Status: No device")
             self.status_label.setStyleSheet("color: red; font-weight: bold;")
@@ -419,9 +401,7 @@ class MifareToolUI(QWidget):
             sector = self.sector_spin.value()
             block = self.block_spin.value()
             key_str = self.key_a_input.text()
-            key_bytes = [int(x, 16) for x in key_str.strip().split()]
-            if len(key_bytes) != 6:
-                raise ValueError("Invalid Key A")
+            key_bytes = parse_key(key_str)
             # Load Key A
             load_key_apdu = [0xFF, 0x82, 0x00, 0x00, 0x06] + key_bytes
             _, sw1, sw2 = connection.transmit(load_key_apdu)
@@ -449,14 +429,19 @@ class MifareToolUI(QWidget):
             self.data_field.setReadOnly(False)
             self.status_label.setText("Status: Block read OK")
             self.status_label.setStyleSheet("color: green; font-weight: bold;")
-            connection.disconnect()
         except Exception as e:
             self.status_label.setText(f"Status: Block read fail: {e}")
             self.status_label.setStyleSheet("color: red; font-weight: bold;")
             self.data_field.setText("")
             self.data_field.setReadOnly(True)
+        finally:
+            try:
+                connection.disconnect()
+            except Exception:
+                pass
 
     def write_block(self):
+        """Write data to the currently selected block."""
         if not self.selected_reader:
             self.status_label.setText("Status: No device")
             self.status_label.setStyleSheet("color: red; font-weight: bold;")
@@ -467,9 +452,7 @@ class MifareToolUI(QWidget):
             sector = self.sector_spin.value()
             block = self.block_spin.value()
             key_str = self.key_a_input.text()
-            key_bytes = [int(x, 16) for x in key_str.strip().split()]
-            if len(key_bytes) != 6:
-                raise ValueError("Invalid Key A")
+            key_bytes = parse_key(key_str)
             # Load Key A
             load_key_apdu = [0xFF, 0x82, 0x00, 0x00, 0x06] + key_bytes
             _, sw1, sw2 = connection.transmit(load_key_apdu)
@@ -499,12 +482,17 @@ class MifareToolUI(QWidget):
                 raise RuntimeError("Write fail")
             self.status_label.setText("Status: Block write OK")
             self.status_label.setStyleSheet("color: green; font-weight: bold;")
-            connection.disconnect()
         except Exception as e:
             self.status_label.setText(f"Status: Block write fail: {e}")
             self.status_label.setStyleSheet("color: red; font-weight: bold;")
+        finally:
+            try:
+                connection.disconnect()
+            except Exception:
+                pass
 
     def toggle_hex_ascii(self):
+        """Toggle between HEX and ASCII display for the last read block."""
         if self.last_block_data is None:
             return
         if self.hex_ascii_toggle.isChecked():
