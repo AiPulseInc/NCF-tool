@@ -1,5 +1,5 @@
 
-# 1. mirafare-tool-ui-breakdown
+# 1. mifare-tool-ui-breakdown
 
 ## Key UI Components
 
